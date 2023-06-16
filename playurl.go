@@ -61,6 +61,12 @@ func (b *BiliroamingGo) handleWebPlayURL(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// 验证 epId
+	if args.epId == 0 {
+		writeErrorJSON(ctx, ERROR_CODE_PARAMETERS, MSG_ERROR_PARAMETERS)
+		return
+	}
+
 	if ok := b.checkEpisodeAreaCache(args.epId, getAreaCode(args.area)); !ok {
 		writeErrorJSON(ctx, ERROR_CODE_GEO_RESTRICED, MSG_ERROR_GEO_RESTRICTED)
 		return
@@ -101,15 +107,17 @@ func (b *BiliroamingGo) handleWebPlayURL(ctx *fasthttp.RequestCtx) {
 		qn = 127
 	}
 
+	clientType := getClientPlatform(ctx, args.appkey)
+
 	var status *userStatus
 	if b.getAuthByArea(args.area) {
 		var ok bool
-		ok, status = b.doAuth(ctx, args.accessKey, args.area, false)
+		ok, status = b.doAuth(ctx, args.accessKey, clientType, args.area, false)
 		if !ok {
 			return
 		}
 
-		playurlCache, err := b.db.GetPlayURLCache(database.DeviceTypeWeb, formatType, int16(qn), getAreaCode(args.area), status.isVip, args.epId)
+		playurlCache, err := b.db.GetPlayURLCache(database.DeviceTypeWeb, formatType, int16(qn), getAreaCode(args.area), status.isVip, false, args.epId)
 		if err == nil && len(playurlCache.Data) > 0 && playurlCache.UpdatedAt.After(time.Now().Add(-b.config.Cache.PlayUrl)) {
 			if b.config.VipOnly && !status.isVip {
 				writeErrorJSON(ctx, ERROR_CODE_VIP_ONLY, MSG_ERROR_VIP_ONLY)
@@ -154,7 +162,7 @@ func (b *BiliroamingGo) handleWebPlayURL(ctx *fasthttp.RequestCtx) {
 	v.Set("fourk", "1")
 	v.Set("qn", strconv.Itoa(qn))
 
-	params, err := SignParams(v, ClientTypeAndroid)
+	params, err := SignParams(v, clientType)
 	if err != nil {
 		b.processError(ctx, err)
 		return
@@ -178,7 +186,7 @@ func (b *BiliroamingGo) handleWebPlayURL(ctx *fasthttp.RequestCtx) {
 		Url:       []byte(url),
 		UserAgent: ctx.UserAgent(),
 	}
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)
@@ -217,7 +225,7 @@ func (b *BiliroamingGo) handleWebPlayURL(ctx *fasthttp.RequestCtx) {
 	}
 
 	if b.getAuthByArea(args.area) {
-		if err := b.db.InsertOrUpdatePlayURLCache(database.DeviceTypeWeb, formatType, int16(qn), getAreaCode(args.area), status.isVip, args.epId, data); err != nil {
+		if err := b.db.InsertOrUpdatePlayURLCache(database.DeviceTypeWeb, formatType, int16(qn), getAreaCode(args.area), status.isVip, false, args.epId, data); err != nil {
 			b.sugar.Error(err)
 		}
 	}
@@ -226,7 +234,7 @@ func (b *BiliroamingGo) handleWebPlayURL(ctx *fasthttp.RequestCtx) {
 		b.sugar.Error(err)
 	} else if ok && isStatusVip != status.isVip {
 		delete(b.accessKeys, args.accessKey)
-		if ok, _ := b.doAuth(ctx, args.accessKey, args.area, true); !ok {
+		if ok, _ := b.doAuth(ctx, args.accessKey, clientType, args.area, true); !ok {
 			return
 		}
 		writeErrorJSON(ctx, ERROR_CODE_VIP_STATUS, MSG_ERROR_VIP_STATUS)
@@ -251,6 +259,12 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 
 	if args.area == "" {
 		writeErrorJSON(ctx, ERROR_CODE_GEO_RESTRICED, MSG_ERROR_GEO_RESTRICTED)
+		return
+	}
+
+	// 验证 epId
+	if args.epId == 0 {
+		writeErrorJSON(ctx, ERROR_CODE_PARAMETERS, MSG_ERROR_PARAMETERS)
 		return
 	}
 
@@ -299,15 +313,17 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 		qn = 127
 	}
 
+	clientType := getClientPlatform(ctx, args.appkey)
+
 	var status *userStatus
 	if b.getAuthByArea(args.area) {
 		var ok bool
-		ok, status = b.doAuth(ctx, args.accessKey, args.area, false)
+		ok, status = b.doAuth(ctx, args.accessKey, clientType, args.area, false)
 		if !ok {
 			return
 		}
 
-		playurlCache, err := b.db.GetPlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), status.isVip, args.epId)
+		playurlCache, err := b.db.GetPlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), status.isVip, false, args.epId)
 		if err == nil && len(playurlCache.Data) > 0 && playurlCache.UpdatedAt.After(time.Now().Add(-b.config.Cache.PlayUrl)) {
 			if b.config.VipOnly && !status.isVip {
 				writeErrorJSON(ctx, ERROR_CODE_VIP_ONLY, MSG_ERROR_VIP_ONLY)
@@ -351,13 +367,9 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	v.Set("platform", "android")
 	v.Set("qn", strconv.Itoa(qn))
 
-	params, err := SignParams(v, ClientTypeAndroid)
+	params, err := SignParams(v, clientType)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -367,11 +379,7 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	}
 	domain, err := idna.New().ToASCII(reverseProxy)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -383,7 +391,7 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 		Url:       []byte(url),
 		UserAgent: ctx.UserAgent(),
 	}
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)
@@ -422,7 +430,7 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	}
 
 	if b.getAuthByArea(args.area) {
-		if err := b.db.InsertOrUpdatePlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), status.isVip, args.epId, data); err != nil {
+		if err := b.db.InsertOrUpdatePlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), status.isVip, false, args.epId, data); err != nil {
 			b.sugar.Error(err)
 		}
 	}
@@ -431,7 +439,7 @@ func (b *BiliroamingGo) handleAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 		b.sugar.Error(err)
 	} else if ok && isStatusVip != status.isVip {
 		delete(b.accessKeys, args.accessKey)
-		if ok, _ := b.doAuth(ctx, args.accessKey, args.area, true); !ok {
+		if ok, _ := b.doAuth(ctx, args.accessKey, clientType, args.area, true); !ok {
 			return
 		}
 		writeErrorJSON(ctx, ERROR_CODE_VIP_STATUS, MSG_ERROR_VIP_STATUS)
@@ -454,10 +462,12 @@ func (b *BiliroamingGo) handleBstarAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	queryArgs := ctx.URI().QueryArgs()
 	args := b.processArgs(queryArgs)
 
-	if args.area == "" {
-		args.area = "th"
-		// writeErrorJSON(ctx, ERROR_CODE_GEO_RESTRICED, MSG_ERROR_GEO_RESTRICTED)
-		// return
+	args.area = "th"
+
+	// 验证 epId
+	if args.epId == 0 {
+		writeErrorJSON(ctx, ERROR_CODE_PARAMETERS, MSG_ERROR_PARAMETERS)
+		return
 	}
 
 	if ok := b.checkEpisodeAreaCache(args.epId, getAreaCode(args.area)); !ok {
@@ -509,14 +519,14 @@ func (b *BiliroamingGo) handleBstarAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	var status *userStatus
 	if b.getAuthByArea(args.area) {
 		var ok bool
-		ok, status = b.doAuth(ctx, args.accessKey, args.area, false)
+		ok, status = b.doAuth(ctx, args.accessKey, getClientPlatform(ctx, args.appkey), args.area, false)
 		if !ok {
 			return
 		} else {
 			isVIP = status.isVip
 		}
 
-		playurlCache, err := b.db.GetPlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), isVIP, args.epId)
+		playurlCache, err := b.db.GetPlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), isVIP, args.preferCodeType, args.epId)
 		if err == nil && len(playurlCache.Data) > 0 && playurlCache.UpdatedAt.After(time.Now().Add(-b.config.Cache.PlayUrl)) {
 			if b.config.VipOnly && !status.isVip {
 				writeErrorJSON(ctx, ERROR_CODE_VIP_ONLY, MSG_ERROR_VIP_ONLY)
@@ -559,14 +569,13 @@ func (b *BiliroamingGo) handleBstarAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	v.Set("platform", "android")
 	v.Set("s_locale", "zh_SG")
 	v.Set("qn", strconv.Itoa(qn))
+	if args.preferCodeType {
+		v.Set("prefer_code_type", "1")
+	}
 
 	params, err := SignParams(v, ClientTypeBstarA)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -576,11 +585,7 @@ func (b *BiliroamingGo) handleBstarAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	}
 	domain, err := idna.New().ToASCII(reverseProxy)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -592,7 +597,7 @@ func (b *BiliroamingGo) handleBstarAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 		Url:       []byte(url),
 		UserAgent: ctx.UserAgent(),
 	}
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)
@@ -631,7 +636,7 @@ func (b *BiliroamingGo) handleBstarAndroidPlayURL(ctx *fasthttp.RequestCtx) {
 	}
 
 	if b.getAuthByArea(args.area) {
-		if err := b.db.InsertOrUpdatePlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), isVIP, args.epId, data); err != nil {
+		if err := b.db.InsertOrUpdatePlayURLCache(database.DeviceTypeAndroid, formatType, int16(qn), getAreaCode(args.area), isVIP, args.preferCodeType, args.epId, data); err != nil {
 			b.sugar.Error(err)
 		}
 	}

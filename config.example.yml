@@ -2,12 +2,14 @@
 debug: false
 # 监听端口
 port: 80
+# 启用 ipv6 (仅连接反代使用)
+ipv6: false
 
 # 仅限大会员用户使用
 vipOnly: false
 
 # 黑名单接口
-blacklistApiUrl: "https://example.com/api/users/%d"
+blacklistApiUrl: "https://black.qimo.ink/api/users/%d"
 # 黑白名单模式
 # 0 - 禁用
 # 1 - 黑白名单
@@ -16,6 +18,9 @@ blockType: 1
 
 # 设置最低漫游版本，详情看哔哩漫游仓库 versionCode
 roamingMinVer: 0
+
+# 设置默认 area 参数
+defaultArea: hk
 
 # 替换泰区 aid (评论投币)
 thRedirect:
@@ -62,6 +67,9 @@ cache:
   thSubtitle: 15m
 
 # 代理
+# 实例
+#   socks5://localhost:9050
+#   username:password@localhost:9050
 proxy:
   cn: socks5://127.0.0.1:7890
   hk: socks5://127.0.0.1:7891
@@ -81,7 +89,7 @@ reverseSearch:
   cn: app.bilibili.com
   hk: app.bilibili.com
   tw: app.bilibili.com
-  th: api.biliintl.com
+  th: app.biliintl.com
 
 # 反代网页搜索域名
 reverseWebSearch:

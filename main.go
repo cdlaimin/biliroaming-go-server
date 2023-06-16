@@ -17,8 +17,8 @@ import (
 
 const (
 	MAJOR    = "2"
-	MINOR    = "22"
-	REVISION = "3"
+	MINOR    = "27"
+	REVISION = "0"
 
 	VERSION = MAJOR + "." + MINOR + "." + REVISION
 
@@ -172,7 +172,7 @@ func initHttpServer(c *Config, b *BiliroamingGo) {
 	}
 	fsHandler := fs.NewRequestHandler()
 
-	mux := func(ctx *fasthttp.RequestCtx) {
+	mux := fasthttp.TimeoutHandler(func(ctx *fasthttp.RequestCtx) {
 		ctx.Response.Header.SetBytesKV([]byte("Server"), []byte(DEFAULT_NAME))
 
 		switch string(ctx.Path()) {
@@ -204,7 +204,7 @@ func initHttpServer(c *Config, b *BiliroamingGo) {
 			fsHandler(ctx)
 			// ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
 		}
-	}
+	}, 15*time.Second, fasthttp.StatusMessage(fasthttp.StatusRequestTimeout))
 
 	b.sugar.Infof("Listening on :%d ...", c.Port)
 	err := fasthttp.ListenAndServe(":"+strconv.Itoa(c.Port), mux)
@@ -281,16 +281,4 @@ func main() {
 	go b.loop()
 
 	initHttpServer(c, b)
-}
-
-func processNotFound(ctx *fasthttp.RequestCtx) {
-	ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
-}
-
-func (b *BiliroamingGo) processError(ctx *fasthttp.RequestCtx, err error) {
-	b.sugar.Error(err)
-	ctx.Error(
-		fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-		fasthttp.StatusInternalServerError,
-	)
 }

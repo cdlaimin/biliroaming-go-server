@@ -19,11 +19,7 @@ func (b *BiliroamingGo) handleBstarAndroidSubtitle(ctx *fasthttp.RequestCtx) {
 	queryArgs := ctx.URI().QueryArgs()
 	args := b.processArgs(queryArgs)
 
-	if args.area == "" {
-		args.area = "th"
-		// writeErrorJSON(ctx, ERROR_CODE_GEO_RESTRICED, MSG_ERROR_GEO_RESTRICTED)
-		// return
-	}
+	args.area = "th"
 
 	client := b.getClientByArea(args.area)
 
@@ -48,11 +44,7 @@ func (b *BiliroamingGo) handleBstarAndroidSubtitle(ctx *fasthttp.RequestCtx) {
 
 	params, err := SignParams(v, ClientTypeBstarA)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -62,11 +54,7 @@ func (b *BiliroamingGo) handleBstarAndroidSubtitle(ctx *fasthttp.RequestCtx) {
 	}
 	domain, err := idna.New().ToASCII(reverseProxy)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -78,7 +66,7 @@ func (b *BiliroamingGo) handleBstarAndroidSubtitle(ctx *fasthttp.RequestCtx) {
 		Url:       []byte(url),
 		UserAgent: ctx.UserAgent(),
 	}
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)

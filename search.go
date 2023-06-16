@@ -89,6 +89,8 @@ func (b *BiliroamingGo) handleAndroidSearch(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	clientType := getClientPlatform(ctx, args.appkey)
+
 	v := url.Values{}
 	v.Set("access_key", args.accessKey)
 	v.Set("area", args.area)
@@ -96,17 +98,13 @@ func (b *BiliroamingGo) handleAndroidSearch(ctx *fasthttp.RequestCtx) {
 	v.Set("highlight", "1")
 	v.Set("keyword", args.keyword)
 	v.Set("type", strconv.Itoa(args.aType))
-	v.Set("mobi_app", "android")
+	v.Set("mobi_app", clientType.String())
 	v.Set("platform", "android")
 	v.Set("pn", strconv.Itoa(args.pn))
 
-	params, err := SignParams(v, ClientTypeAndroid)
+	params, err := SignParams(v, clientType)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -116,11 +114,7 @@ func (b *BiliroamingGo) handleAndroidSearch(ctx *fasthttp.RequestCtx) {
 	}
 	domain, err := idna.New().ToASCII(reverseProxy)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -132,7 +126,7 @@ func (b *BiliroamingGo) handleAndroidSearch(ctx *fasthttp.RequestCtx) {
 		Url:       []byte(url),
 		UserAgent: ctx.UserAgent(),
 	}
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)
@@ -179,11 +173,7 @@ func (b *BiliroamingGo) handleBstarAndroidSearch(ctx *fasthttp.RequestCtx) {
 	queryArgs := ctx.URI().QueryArgs()
 	args := b.processArgs(queryArgs)
 
-	if args.area == "" {
-		args.area = "th"
-		// writeErrorJSON(ctx, ERROR_CODE_GEO_RESTRICED, MSG_ERROR_GEO_RESTRICTED)
-		// return
-	}
+	args.area = "th"
 
 	client := b.getClientByArea(args.area)
 
@@ -204,11 +194,7 @@ func (b *BiliroamingGo) handleBstarAndroidSearch(ctx *fasthttp.RequestCtx) {
 
 	params, err := SignParams(v, ClientTypeBstarA)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -218,11 +204,7 @@ func (b *BiliroamingGo) handleBstarAndroidSearch(ctx *fasthttp.RequestCtx) {
 	}
 	domain, err := idna.New().ToASCII(reverseProxy)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -234,7 +216,7 @@ func (b *BiliroamingGo) handleBstarAndroidSearch(ctx *fasthttp.RequestCtx) {
 		Url:       []byte(url),
 		UserAgent: ctx.UserAgent(),
 	}
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)
@@ -301,11 +283,7 @@ func (b *BiliroamingGo) handleWebSearch(ctx *fasthttp.RequestCtx) {
 
 	params, err := SignParams(v, ClientTypeAndroid)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -315,11 +293,7 @@ func (b *BiliroamingGo) handleWebSearch(ctx *fasthttp.RequestCtx) {
 	}
 	domain, err := idna.New().ToASCII(reverseProxy)
 	if err != nil {
-		b.sugar.Error(err)
-		ctx.Error(
-			fasthttp.StatusMessage(fasthttp.StatusInternalServerError),
-			fasthttp.StatusInternalServerError,
-		)
+		b.processError(ctx, err)
 		return
 	}
 
@@ -341,7 +315,7 @@ func (b *BiliroamingGo) handleWebSearch(ctx *fasthttp.RequestCtx) {
 		Key:   buvid3Key,
 		Value: buvid3Value,
 	})
-	data, err := b.doRequestJsonWithRetry(client, reqParams, 2)
+	data, err := b.doRequestJson(client, reqParams)
 	if err != nil {
 		if errors.Is(err, ErrorHttpStatusLimited) {
 			data = []byte(`{"code":-412,"message":"请求被拦截"}`)

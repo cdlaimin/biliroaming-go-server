@@ -50,7 +50,7 @@ func NewErrorHttpLimited(code int) *ErrorHttpStatus {
 }
 
 var (
-	ErrorHttpStatusLimited = NewErrorHttpLimited(412)
+	ErrorHttpStatusLimited = NewErrorHttpLimited(-412)
 )
 
 func (b *BiliroamingGo) initProxy(c *Config) {
@@ -62,18 +62,24 @@ func (b *BiliroamingGo) initProxy(c *Config) {
 }
 
 func (b *BiliroamingGo) newClient(proxy string) *fasthttp.Client {
-	if proxy != "" {
+	var dialFunc fasthttp.DialFunc
+	switch {
+	case strings.HasPrefix(proxy, "socks5://"), strings.HasPrefix(proxy, "socks5h://"):
 		b.sugar.Debug("New socks proxy client: ", proxy)
-		return &fasthttp.Client{
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			Dial:         fasthttpproxy.FasthttpSocksDialer(proxy),
-		}
+		dialFunc = fasthttpproxy.FasthttpSocksDialer(proxy)
+	case proxy != "":
+		b.sugar.Debug("New http proxy client: ", proxy)
+		dialFunc = fasthttpproxy.FasthttpHTTPDialer(proxy)
+	case proxy == "":
+		b.sugar.Debug("New normal client")
+		dialFunc = nil
 	}
-	b.sugar.Debug("New normal client")
+
 	return &fasthttp.Client{
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		ReadTimeout:   10 * time.Second,
+		WriteTimeout:  10 * time.Second,
+		Dial:          dialFunc,
+		DialDualStack: b.config.IPV6,
 	}
 }
 
@@ -115,6 +121,8 @@ func (b *BiliroamingGo) getReverseSearchProxyByArea(area string) string {
 		return b.config.ReverseSearch.HK
 	case "tw":
 		return b.config.ReverseSearch.TW
+	case "th":
+		return b.config.ReverseSearch.TH
 	default:
 		return ""
 	}
@@ -168,6 +176,21 @@ func writeHealthJSON(ctx *fasthttp.RequestCtx, health *entity.Health) {
 	ctx.Write(respData)
 }
 
+func getClientPlatform(ctx *fasthttp.RequestCtx, appkey string) ClientType {
+	platform := string(ctx.Request.Header.PeekBytes([]byte("platform-from-biliroaming")))
+	if platform == "" && appkey == "" {
+		return ClientTypeIphone
+	}
+	clientType := ClientType(platform)
+	if clientType.IsValid() {
+		return clientType
+	}
+	if appkey != "" {
+		return getClientTypeFromAppkey(appkey)
+	}
+	return ClientTypeUnknown
+}
+
 func (b *BiliroamingGo) checkRoamingVer(ctx *fasthttp.RequestCtx) bool {
 	versionCode := ctx.Request.Header.PeekBytes([]byte("build"))
 	versionName := ctx.Request.Header.PeekBytes([]byte("x-from-biliroaming"))
@@ -209,7 +232,7 @@ func (b *BiliroamingGo) doRequest(client *fasthttp.Client, params *HttpRequestPa
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
 	req.SetRequestURIBytes(params.Url)
-	req.Header.SetBytesKV([]byte("Accept-Encoding"), []byte("br, gzip"))
+	req.Header.SetBytesKV([]byte("Accept-Encoding"), []byte("br, gzip, deflate"))
 	req.Header.SetUserAgentBytes(params.UserAgent)
 	req.Header.SetMethodBytes(params.Method)
 	if params.Cookie != nil {
@@ -240,6 +263,8 @@ func (b *BiliroamingGo) doRequest(client *fasthttp.Client, params *HttpRequestPa
 		bodyBytes, err = resp.BodyGunzip()
 	} else if bytes.EqualFold(contentEncoding, []byte("br")) {
 		bodyBytes, err = resp.BodyUnbrotli()
+	} else if bytes.EqualFold(contentEncoding, []byte("deflate")) {
+		bodyBytes, err = resp.BodyInflate()
 	} else {
 		bodyBytes = resp.Body()
 	}
@@ -251,28 +276,12 @@ func (b *BiliroamingGo) doRequest(client *fasthttp.Client, params *HttpRequestPa
 	if isLimited, err := isResponseLimited(bodyBytes); err != nil {
 		return nil, err
 	} else if isLimited {
-		return nil, NewErrorHttpLimited(-412)
+		return nil, ErrorHttpStatusLimited
 	}
 
 	b.sugar.Debug("Content: ", string(bodyBytes))
 
 	return bodyBytes, nil
-}
-
-func (b *BiliroamingGo) doRequestJsonWithRetry(client *fasthttp.Client, params *HttpRequestParams, retry int) ([]byte, error) {
-	var err error
-	var bodyBytes []byte
-	for i := 0; i < retry; i++ {
-		bodyBytes, err = b.doRequestJson(client, params)
-		if err == nil {
-			return bodyBytes, nil
-		}
-		if errors.Is(err, ErrorHttpStatusLimited) {
-			return nil, err
-		}
-		b.sugar.Errorf("doRequestJsonWithRetry: %s", err)
-	}
-	return nil, err
 }
 
 func (b *BiliroamingGo) doRequestJson(client *fasthttp.Client, params *HttpRequestParams) ([]byte, error) {
@@ -291,7 +300,7 @@ func (b *BiliroamingGo) doRequestJson(client *fasthttp.Client, params *HttpReque
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
 	req.SetRequestURIBytes(params.Url)
-	req.Header.SetBytesKV([]byte("Accept-Encoding"), []byte("br, gzip"))
+	req.Header.SetBytesKV([]byte("Accept-Encoding"), []byte("br, gzip, deflate"))
 	req.Header.SetUserAgentBytes(params.UserAgent)
 	req.Header.SetMethodBytes(params.Method)
 	if params.Cookie != nil {
@@ -328,6 +337,8 @@ func (b *BiliroamingGo) doRequestJson(client *fasthttp.Client, params *HttpReque
 		bodyBytes, err = resp.BodyGunzip()
 	} else if bytes.EqualFold(contentEncoding, []byte("br")) {
 		bodyBytes, err = resp.BodyUnbrotli()
+	} else if bytes.EqualFold(contentEncoding, []byte("deflate")) {
+		bodyBytes, err = resp.BodyInflate()
 	} else {
 		bodyBytes = resp.Body()
 	}
@@ -339,7 +350,7 @@ func (b *BiliroamingGo) doRequestJson(client *fasthttp.Client, params *HttpReque
 	if isLimited, err := isResponseLimited(bodyBytes); err != nil {
 		return nil, err
 	} else if isLimited {
-		return nil, NewErrorHttpLimited(-412)
+		return nil, ErrorHttpStatusLimited
 	}
 
 	body := string(bodyBytes)
@@ -353,4 +364,15 @@ func (b *BiliroamingGo) doRequestJson(client *fasthttp.Client, params *HttpReque
 	// }
 
 	return []byte(body), nil
+}
+
+func processNotFound(ctx *fasthttp.RequestCtx) {
+	ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
+}
+
+func (b *BiliroamingGo) processError(ctx *fasthttp.RequestCtx, err error) {
+	if !errors.Is(err, fasthttp.ErrTimeout) && !errors.Is(err, fasthttp.ErrTLSHandshakeTimeout) && !errors.Is(err, fasthttp.ErrConnectionClosed) {
+		b.sugar.Error(err)
+	}
+	writeErrorJSON(ctx, ERROR_CODE_INTERNAL_SERVER, MSG_ERROR_INTERNAL_SERVER)
 }

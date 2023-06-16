@@ -62,11 +62,12 @@ func (h *DbHelper) GetKey(key string) (*models.AccessKey, error) {
 }
 
 // InsertOrUpdateKey insert or update access key data
-func (h *DbHelper) InsertOrUpdateKey(key string, uid int64) error {
+func (h *DbHelper) InsertOrUpdateKey(key string, uid int64, clientType string) error {
 	var accessKeyTable models.AccessKey
 	accessKeyTable.Key = key
 	accessKeyTable.UID = uid
-	return accessKeyTable.Upsert(h.ctx, h.db, true, []string{"key"}, boil.Whitelist("updated_at"), boil.Infer())
+	accessKeyTable.ClientType = clientType
+	return accessKeyTable.Upsert(h.ctx, h.db, true, []string{"key"}, boil.Whitelist("client_type", "updated_at"), boil.Infer())
 }
 
 // CleanupAccessKeys cleanup access keys if exceeds duration
@@ -112,23 +113,24 @@ func (h *DbHelper) CleanupUsers(duration time.Duration) (int64, error) {
 }
 
 // GetPlayURLCache get play url caching with device type, area or episode ID
-func (h *DbHelper) GetPlayURLCache(deviceType DeviceType, formatType FormatType, quality int16, area Area, isVIP bool, episodeID int64) (*models.PlayURLCach, error) {
+func (h *DbHelper) GetPlayURLCache(deviceType DeviceType, formatType FormatType, quality int16, area Area, isVIP bool, preferCodeType bool, episodeID int64) (*models.PlayURLCach, error) {
 	return models.PlayURLCaches(
 		models.PlayURLCachWhere.DeviceType.EQ(int16(deviceType)),
 		models.PlayURLCachWhere.FormatType.EQ(int16(formatType)),
 		models.PlayURLCachWhere.Quality.EQ(quality),
 		models.PlayURLCachWhere.Area.EQ(int16(area)),
 		models.PlayURLCachWhere.IsVip.EQ(isVIP),
+		models.PlayURLCachWhere.PreferCodeType.EQ(preferCodeType),
 		models.PlayURLCachWhere.EpisodeID.EQ(episodeID),
 		qm.OrderBy("updated_at DESC"),
 	).One(h.ctx, h.db)
 }
 
 // InsertOrUpdatePlayURLCache insert or update play url cache data
-func (h *DbHelper) InsertOrUpdatePlayURLCache(deviceType DeviceType, formatType FormatType, quality int16, area Area, isVIP bool, episodeID int64, data []byte) error {
+func (h *DbHelper) InsertOrUpdatePlayURLCache(deviceType DeviceType, formatType FormatType, quality int16, area Area, isVIP bool, preferCodeType bool, episodeID int64, data []byte) error {
 	var playUrlTable models.PlayURLCach
 
-	oldData, err := h.GetPlayURLCache(deviceType, formatType, quality, area, isVIP, episodeID)
+	oldData, err := h.GetPlayURLCache(deviceType, formatType, quality, area, isVIP, preferCodeType, episodeID)
 	if err == nil {
 		playUrlTable.ID = oldData.ID
 	}
@@ -138,9 +140,10 @@ func (h *DbHelper) InsertOrUpdatePlayURLCache(deviceType DeviceType, formatType 
 	playUrlTable.Quality = quality
 	playUrlTable.Area = int16(area)
 	playUrlTable.IsVip = isVIP
+	playUrlTable.PreferCodeType = preferCodeType
 	playUrlTable.EpisodeID = episodeID
 	playUrlTable.Data = data
-	return playUrlTable.Upsert(h.ctx, h.db, true, []string{"id"}, boil.Whitelist("data", "updated_at"), boil.Greylist("device_type", "area", "is_vip", "quality"))
+	return playUrlTable.Upsert(h.ctx, h.db, true, []string{"id"}, boil.Whitelist("data", "updated_at"), boil.Greylist("device_type", "area", "is_vip", "quality", "prefer_code_type"))
 }
 
 // CleanupPlayURLCache cleanup playurl if exceeds duration
